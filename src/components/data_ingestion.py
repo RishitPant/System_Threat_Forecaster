@@ -6,6 +6,9 @@ from src.exception import CustomException
 from src.logger import logging
 import pandas as pd
 from dataclasses import dataclass
+from src.components.model_trainer import ModelTrainerConfig, ModelTrainer
+from src.components.data_transformation import DataTransformation
+from sklearn.model_selection import train_test_split
 
 
 @dataclass
@@ -22,16 +25,12 @@ class DataIngestion:
     def initiate_data_ingestion(self):
         logging.info("Entered the data ingestion component.")
         try:
-            # Load EDA-cleaned files — these already have duplicates removed
-            # and redundant columns dropped from the EDA notebook
             train_df = pd.read_csv('notebook/data/train_eda_clean.csv')
             test_df  = pd.read_csv('notebook/data/test_eda_clean.csv')
             logging.info(f'Read train {train_df.shape} and test {test_df.shape} datasets.')
 
             os.makedirs(os.path.dirname(self.ingestion_config.train_data_path), exist_ok=True)
 
-            # Internal train/val split from labelled train data (mirrors cell 26)
-            from sklearn.model_selection import train_test_split
             X = train_df.drop(columns=["target"])
             y = train_df["target"]
             X_train, X_val, y_train, y_val = train_test_split(
@@ -58,19 +57,18 @@ class DataIngestion:
 
 
 if __name__ == "__main__":
-    from src.components.data_transformation import DataTransformation
+    # Ingest
+    ingestion = DataIngestion()
+    train_path, val_path, test_path = ingestion.initiate_data_ingestion()
+    print(f"Train: {train_path} | Val: {val_path} | Test: {test_path}")
 
-    obj = DataIngestion()
-    train_path, val_path, test_path = obj.initiate_data_ingestion()
-    print(f"Train: {train_path}")
-    print(f"Val:   {val_path}")
-    print(f"Test:  {test_path}")
-
-    data_transformation = DataTransformation()
+    # Transform
+    transformation = DataTransformation()
     train_arr, val_arr, test_arr, preprocessor_path = \
-        data_transformation.initiate_data_transformation(train_path, val_path, test_path)
+        transformation.initiate_data_transformation(train_path, val_path, test_path)
+    print(f"Train: {train_arr.shape} | Val: {val_arr.shape} | Test: {test_arr.shape}")
 
-    print(f"Train array shape: {train_arr.shape}")
-    print(f"Val array shape:   {val_arr.shape}")
-    print(f"Test array shape:  {test_arr.shape}")
-    print(f"Preprocessor: {preprocessor_path}")
+    # Train
+    trainer = ModelTrainer()
+    val_accuracy = trainer.initiate_model_trainer(train_arr, val_arr)
+    print(f"Best model val accuracy: {val_accuracy:.4f}")
