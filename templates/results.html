@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Results — System Threat Forecaster</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:      #0a0c10;
+    --surface: #111318;
+    --border:  #1e2330;
+    --accent:  #00e5ff;
+    --danger:  #ff3d5a;
+    --safe:    #00e676;
+    --text:    #c8d0e0;
+    --muted:   #4a5268;
+    --mono:    'Share Tech Mono', monospace;
+    --sans:    'DM Sans', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    padding: 2.5rem 1.5rem;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,229,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  .top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+
+  .back-link {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--muted);
+    text-decoration: none;
+    letter-spacing: 0.05em;
+    transition: color 0.2s;
+  }
+  .back-link:hover { color: var(--accent); }
+
+  h1 {
+    font-family: var(--mono);
+    font-size: 1.4rem;
+    color: #fff;
+  }
+  h1 span { color: var(--accent); }
+
+  /* Stats row */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+  }
+
+  .stat-label {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--muted);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+  }
+
+  .stat-value {
+    font-family: var(--mono);
+    font-size: 2rem;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  .stat-value.danger { color: var(--danger); }
+  .stat-value.safe   { color: var(--safe);   }
+
+  .stat-pct {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-top: 0.2rem;
+    font-family: var(--mono);
+  }
+
+  /* Risk bar */
+  .risk-bar-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 2rem;
+  }
+
+  .risk-bar-label {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+    letter-spacing: 0.12em;
+    margin-bottom: 0.75rem;
+  }
+
+  .risk-bar {
+    height: 8px;
+    border-radius: 4px;
+    background: var(--border);
+    overflow: hidden;
+  }
+
+  .risk-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--safe), var(--danger));
+    transition: width 1s cubic-bezier(.4,0,.2,1);
+  }
+
+  /* Table section */
+  .table-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .table-title {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--muted);
+    letter-spacing: 0.12em;
+  }
+
+  .table-note {
+    font-size: 0.72rem;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    overflow-x: auto;
+    margin-bottom: 1.5rem;
+  }
+
+  table.results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+  }
+
+  table.results-table th {
+    background: rgba(0,229,255,0.06);
+    color: var(--accent);
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    padding: 0.75rem 1.25rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+
+  table.results-table td {
+    padding: 0.65rem 1.25rem;
+    border-bottom: 1px solid rgba(30,35,48,0.6);
+    color: var(--text);
+  }
+
+  table.results-table tr:last-child td { border-bottom: none; }
+  table.results-table tr:hover td { background: rgba(0,229,255,0.025); }
+
+  /* Color target column values */
+  table.results-table td:last-child { font-weight: 600; }
+
+  .btn-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.85rem 1.75rem;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    transition: opacity 0.2s;
+    text-decoration: none;
+  }
+
+  .btn-download:hover { opacity: 0.85; }
+
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.85rem 1.75rem;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+    text-decoration: none;
+  }
+
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+  .actions {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  @media (max-width: 500px) {
+    .stats { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="top-bar">
+    <a href="/" class="back-link">← New prediction</a>
+    <h1>Prediction <span>Results</span></h1>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-label">Total Systems</div>
+      <div class="stat-value">{{ total }}</div>
+      <div class="stat-pct">scored</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">At Risk</div>
+      <div class="stat-value danger">{{ infected }}</div>
+      <div class="stat-pct">{{ "%.1f"|format(infected / total * 100) }}% of systems</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Clean</div>
+      <div class="stat-value safe">{{ clean }}</div>
+      <div class="stat-pct">{{ "%.1f"|format(clean / total * 100) }}% of systems</div>
+    </div>
+  </div>
+
+  <!-- Risk bar -->
+  <div class="risk-bar-wrap">
+    <div class="risk-bar-label">INFECTION RATE DISTRIBUTION</div>
+    <div class="risk-bar">
+      <div class="risk-fill" id="riskFill" style="width: 0%"></div>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="table-header">
+    <span class="table-title">PREDICTIONS PREVIEW</span>
+    <span class="table-note">Showing first 50 rows</span>
+  </div>
+
+  <div class="table-wrap">
+    {{ table | safe }}
+  </div>
+
+  <!-- Download -->
+  <div class="actions">
+    <form action="/download" method="POST">
+      <input type="hidden" name="csv_data" value="{{ csv_data }}">
+      <button type="submit" class="btn-download">⬇ Download submission.csv</button>
+    </form>
+    <a href="/" class="btn-secondary">↑ Upload another file</a>
+  </div>
+
+</div>
+
+<script>
+  const pct = Number('{{ "%.1f"|format(infected / total * 100) }}');
+
+  setTimeout(() => {
+    document.getElementById('riskFill').style.width = pct + '%';
+  }, 100);
+
+  document.querySelectorAll('table.results-table td:last-child').forEach(td => {
+    if (td.textContent.trim() === '1') {
+      td.style.color = 'var(--danger)';
+    } else if (td.textContent.trim() === '0') {
+      td.style.color = 'var(--safe)';
+    }
+  });
+</script>
+</body>
+</html>
