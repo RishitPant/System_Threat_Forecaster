@@ -1,0 +1,6 @@
+env/
+notebook/
+logs/
+__pycache__/
+*.egg-info/
+artifacts/*.csv
