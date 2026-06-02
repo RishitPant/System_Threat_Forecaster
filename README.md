@@ -1,3 +1,12 @@
+---
+title: System Threat Forecaster
+emoji: 🛡️
+colorFrom: blue
+colorTo: red
+sdk: docker
+pinned: false
+---
+
 # System Threat Forecaster
 
 A machine learning web application that predicts whether a Windows system is infected with malware, based on hardware and OS telemetry features. Upload a CSV of system records and get back a binary threat classification for each row.
