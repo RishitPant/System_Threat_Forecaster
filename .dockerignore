@@ -3,6 +3,6 @@ notebook/
 logs/
 __pycache__/
 *.egg-info/
-artifacts/train.csv
-artifacts/val.csv
-artifacts/test.csv
+artifacts/*.csv
+notebook/data/*.csv
+notebook/Model_Training.ipynb
