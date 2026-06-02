@@ -8,5 +8,6 @@ xgboost
 lightgbm
 dill
 flask
+pytest
 
 #-e .
