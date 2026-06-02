@@ -3,4 +3,6 @@ notebook/
 logs/
 __pycache__/
 *.egg-info/
-artifacts/*.csv
+artifacts/train.csv
+artifacts/val.csv
+artifacts/test.csv
