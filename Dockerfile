@@ -4,6 +4,9 @@ FROM python:3.11-slim
 # Set the working directory inside the container
 WORKDIR /app
 
+# Install libgomp required by LightGBM
+RUN apt-get update && apt-get install -y libgomp1 && rm -rf /var/lib/apt/lists/*
+
 # Copy just the requirements first (this makes future builds faster)
 COPY requirements.txt .
 
