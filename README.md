@@ -7,17 +7,43 @@ sdk: docker
 pinned: false
 ---
 
-# System Threat Forecaster
+# 🛡️ System Threat Forecaster
 
-A machine learning web application that predicts whether a Windows system is infected with malware, based on hardware and OS telemetry features. Upload a CSV of system records and get back a binary threat classification for each row.
+A production-ready machine learning web application that predicts whether a Windows system is infected with malware, using hardware and OS telemetry features. Upload a CSV of system records and get back a binary threat classification for each row — downloadable as `submission.csv`.
+
+> **Live on Hugging Face Spaces** → [rishitpant/system-threat-forecaster](https://huggingface.co/spaces/rishitpant/system-threat-forecaster)
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Project Structure](#project-structure)
+- [Full ML Pipeline](#full-ml-pipeline)
+- [Web Application](#web-application)
+- [Getting Started](#getting-started)
+- [Docker](#docker)
+- [CI/CD](#cicd)
+- [Testing](#testing)
+- [Dependencies](#dependencies)
+- [Author](#author)
 
 ---
 
 ## Overview
 
-System Threat Forecaster is a binary classification pipeline built around a large dataset of Windows device telemetry (engine versions, OS metadata, hardware specs, antivirus signature data, etc.). It trains an ensemble model — selected from XGBoost, LightGBM, and Random Forest via RFECV feature selection — and serves predictions through a Flask web UI.
+System Threat Forecaster is an end-to-end binary classification system built around a large dataset of Windows device telemetry — engine versions, OS metadata, hardware specs, antivirus signature data, and more. The goal is to predict `target` (0 = clean, 1 = malware-infected) for each system record.
 
-The app is containerized and configured to run on [Hugging Face Spaces](https://huggingface.co/spaces), listening on port `7860`.
+The pipeline covers:
+
+- **Data Cleaning** — drops duplicates, irrelevant columns, and rows with missing targets
+- **Feature Engineering** — version splitting, date decomposition, categorical grouping, derived features
+- **Preprocessing** — a sklearn `ColumnTransformer` with separate pipelines per column type
+- **Model Selection** — 7-model baseline evaluation → RFECV tuning on the top 3 → best model saved
+- **Inference** — a `PredictPipeline` that mirrors training transformations exactly
+- **Web UI** — Flask app with drag-and-drop CSV upload, a results summary, preview table, and CSV download
+
+The app is containerized with Docker and deployed on [Hugging Face Spaces](https://huggingface.co/spaces) (port `7860`). GitHub Actions handles CI (pytest) and CD (push to HF Space) on every `main` push.
 
 ---
 
@@ -25,63 +51,138 @@ The app is containerized and configured to run on [Hugging Face Spaces](https://
 
 ```
 SystemThreatForecaster/
-├── app.py                        # Flask application entry point
-├── Dockerfile                    # Container definition (Python 3.9-slim)
-├── requirements.txt              # Python dependencies
-├── setup.py                      # Package setup (name: threatforecaster)
+│
+├── app.py                            # Flask entry point (routes: /, /predict, /download)
+├── Dockerfile                        # Python 3.11-slim image, exposes port 7860
+├── requirements.txt                  # All Python dependencies
+├── setup.py                          # Installable package: threatforecaster v0.0.1
 │
 ├── src/
-│   ├── exception.py              # Custom exception with traceback info
-│   ├── logger.py                 # Timestamped file logger
-│   ├── utils.py                  # save_object, load_object, evaluate_models
+│   ├── exception.py                  # CustomException with file + line traceback
+│   ├── logger.py                     # Timestamped file logger → logs/<timestamp>.log
+│   ├── utils.py                      # save_object, load_object (dill), evaluate_models
+│   │
 │   ├── components/
-│   │   ├── data_ingestion.py     # Reads cleaned CSVs, performs train/val split
-│   │   ├── data_transformation.py# Feature engineering + sklearn preprocessor
-│   │   └── model_trainer.py      # Baseline eval → RFECV → best model saved
+│   │   ├── data_cleaning.py          # Drops duplicates, bad columns, missing targets
+│   │   ├── data_ingestion.py         # Reads EDA-cleaned CSVs, 80/20 train/val split
+│   │   ├── data_transformation.py    # Feature engineering + ColumnTransformer fit/save
+│   │   ├── model_trainer.py          # Baseline eval → RFECV top-3 → best model saved
+│   │   └── model_pusher.py           # (reserved for future deployment automation)
+│   │
 │   └── pipeline/
-│       └── predict_pipeline.py   # Inference: feature eng → preprocess → predict
+│       ├── train_pipeline.py         # Orchestrates full training run end-to-end
+│       └── predict_pipeline.py       # Inference: FE → preprocess → RFECV mask → predict
 │
 ├── artifacts/
-│   ├── model.pkl                 # Serialized best model + RFECV feature mask
-│   ├── preprocessor.pkl          # Fitted ColumnTransformer
-│   ├── train.csv                 # 80% split of training data
-│   ├── val.csv                   # 20% split of training data
-│   └── test.csv                  # Hold-out test set
-│
-├── notebook/
-│   ├── EDA.ipynb                 # Exploratory data analysis
-│   ├── Model_Training.ipynb      # Interactive model development
-│   └── data/
-│       ├── train.csv / test.csv              # Raw data
-│       ├── train_eda_clean.csv               # EDA-cleaned train set
-│       ├── test_eda_clean.csv                # EDA-cleaned test set
-│       └── submission.csv                    # Kaggle-format predictions
+│   ├── model.pkl                     # Best model dict: {model, selected (RFECV mask), name}
+│   └── preprocessor.pkl              # Fitted ColumnTransformer
 │
 ├── templates/
-│   ├── index.html                # Upload form UI
-│   └── results.html              # Predictions table + download
+│   ├── index.html                    # Drag-and-drop upload UI (cyberpunk dark theme)
+│   ├── results.html                  # Prediction summary + 50-row preview table
+│   └── home.html                     # (reserved)
 │
-└── logs/                         # Timestamped run logs
+├── notebook/
+│   └── EDA.ipynb                     # Exploratory data analysis
+│
+├── tests/
+│   └── test_app.py                   # pytest: homepage 200 OK
+│
+├── logs/                             # Auto-generated timestamped log files
+│
+├── .github/
+│   └── workflows/
+│       └── cicd.yaml                 # GitHub Actions: test → deploy to HF Spaces
+│
+├── .gitignore
+├── .dockerignore
+└── .gitattributes
 ```
 
 ---
 
-## ML Pipeline
+## Full ML Pipeline
 
-### 1. Data Ingestion (`data_ingestion.py`)
-Reads `train_eda_clean.csv` and `test_eda_clean.csv` from `notebook/data/`, performs an 80/20 train/val split, and writes the splits to `artifacts/`.
+### Step 0 — Data Cleaning (`data_cleaning.py`)
 
-### 2. Feature Engineering (`data_transformation.py`)
-Applied identically at training and inference time:
+Before ingestion, raw CSV data is cleaned:
 
-- **Version splitting** — `EngineVersion`, `AppVersion`, `SignatureVersion`, and `NumericOSVersion` are split on `.` into Major / Minor / Build / Revision numeric columns.
-- **Date decomposition** — `DateAS` (malware signature date) and `DateOS` (OS install date) are expanded into year, month, day, hour, and minute components.
-- **Categorical grouping** — High-cardinality fields like `MDC2FormFactor`, `PrimaryDiskType`, `ChassisType`, `PowerPlatformRole`, `OSBranch`, and `OSEdition` are grouped into consolidated buckets.
-- **Preprocessing** — A `ColumnTransformer` applies `MinMaxScaler` to numerical columns, `OrdinalEncoder` to binary columns, and `OneHotEncoder` to remaining categoricals. Missing values are imputed before scaling/encoding. The fitted preprocessor is saved to `artifacts/preprocessor.pkl`.
+- **Duplicate removal** — drops exact duplicate rows from the training set
+- **Column pruning** — removes 16 irrelevant/redundant columns including `MachineID`, `IsBetaUser`, `SMode`, `IsVirtualDevice`, `OSBuildLab`, `Processor`, `OSVersion`, and several others
+- **Missing target handling** — drops rows where the `target` label is null
 
-### 3. Model Training (`model_trainer.py`)
+Outputs `train_eda_clean.csv` and `test_eda_clean.csv` to `notebook/data/`.
 
-**Baseline evaluation** across 7 classifiers:
+---
+
+### Step 1 — Data Ingestion (`data_ingestion.py`)
+
+Reads the EDA-cleaned CSVs from `notebook/data/` and performs an **80/20 stratified train/val split** (random state 42). Writes three files to `artifacts/`:
+
+| File | Description |
+|---|---|
+| `train.csv` | 80% of training data (features + target) |
+| `val.csv` | 20% of training data (features + target) |
+| `test.csv` | Hold-out Kaggle test set (no target) |
+
+---
+
+### Step 2 — Feature Engineering (`data_transformation.py`)
+
+Applied identically at training and inference time via `_apply_feature_engineering()`:
+
+**Version Splitting** — `EngineVersion`, `AppVersion`, `SignatureVersion`, `NumericOSVersion` are split on `.` into `_Major`, `_Minor`, `_Build`, `_Revision` numeric columns.
+
+**Date Decomposition** — `DateAS` (antivirus signature date) → `Malware_year/month/day/hour/minute`; `DateOS` (OS install date) → `OS_year/month/day`.
+
+**Categorical Grouping** — High-cardinality string columns are bucketed into clean groups:
+
+| Column | Groups |
+|---|---|
+| `MDC2FormFactor` | Desktop, Notebook, Tablet, Server |
+| `PrimaryDiskType` | HDD, SSD, Others |
+| `ChassisType` | Desktop, Notebook, Tablet, Others |
+| `PowerPlatformRole` | Desktop, Portable, Server, Others |
+| `OSBranch` | rs_release, th_release |
+| `OSEdition` | Core, Professional, Enterprise, Others |
+| `OSInstallType` | Upgrade, Clean, Others |
+| `AutoUpdateOptionsName` | Auto, Manual, Off, Unknown |
+| `LicenseActivationChannel` | Retail, Volume, OEM |
+| `FlightRing` | Retail, Insider, Disabled, Unknown |
+
+**Derived Features** — computed from existing columns:
+
+| Feature | Formula |
+|---|---|
+| `Days_since_OS_Installation` | `Malware_day − OS_day` |
+| `Ram_per_core` | `TotalPhysicalRAMMB / ProcessorCoreCount` |
+| `Aspect_Ratio` | `ResolutionH / ResolutionV` |
+| `Pixel_Density` | `(ResH × ResV) / DiagonalInches` |
+| `Primary_Disk_Allocated` | `PrimaryDiskCapacityMB / SystemVolumeCapacityMB` |
+| `Free_Disk_Space` | `(SysVolCapacity − PrimaryDiskCapacity) / PrimaryDiskCapacity` |
+
+**Column Cleanup** — drops original version/date columns and a set of redundant post-FE columns (`SignatureVersion_Minor/Major/Revision`, `AppVersion_Major`, `NumericOS_*`, `ProductName`, `OsPlatformSubRelease`, `OSBuildRevisionOnly`).
+
+---
+
+### Step 3 — Preprocessing (`data_transformation.py`)
+
+A `ColumnTransformer` is **fit on training data only** and applied to train, val, and test:
+
+| Column Type | Detection | Pipeline |
+|---|---|---|
+| **Numerical** | float64/int64, not binary, not ID | `SimpleImputer(mean)` → `MinMaxScaler` |
+| **Binary** | exactly 2 unique values | `SimpleImputer(most_frequent)` → `OrdinalEncoder` |
+| **ID columns** | int/float with "ID" or "Identifier" in name | `SimpleImputer(most_frequent)` |
+| **Categorical** | object dtype | `SimpleImputer(most_frequent)` → `OneHotEncoder(handle_unknown='ignore')` |
+
+The fitted preprocessor is saved to `artifacts/preprocessor.pkl` using `dill`.
+
+---
+
+### Step 4 — Model Training (`model_trainer.py`)
+
+**Phase 1 — Baseline evaluation** across 7 classifiers (default hyperparameters):
 
 | Model | Val Accuracy |
 |---|---|
@@ -93,22 +194,47 @@ Applied identically at training and inference time:
 | Logistic Regression | 0.5539 |
 | Decision Tree | 0.5370 |
 
-**RFECV tuning** is then run on the top 3 models (XGBoost, LightGBM, Random Forest). Each model undergoes recursive feature elimination with cross-validation to select an optimal feature subset, followed by training with tuned hyperparameters. The best-performing model and its RFECV feature mask are saved together to `artifacts/model.pkl`.
+**Phase 2 — RFECV tuning** on the top 3 models with tuned hyperparameters:
 
-### 4. Prediction Pipeline (`predict_pipeline.py`)
-At inference time: loads `preprocessor.pkl` and `model.pkl`, applies the same feature engineering, transforms the input through the preprocessor, applies the RFECV feature mask, and returns binary predictions (0 = clean, 1 = infected).
+| Model | Hyperparameters | RFECV step | CV folds |
+|---|---|---|---|
+| XGBoost | `max_depth=5, lr=0.1, n_estimators=200, reg_lambda=10` | 2 | 5 |
+| LightGBM | `max_depth=7, lr=0.1, num_leaves=31, min_child_samples=30, reg_lambda=10` | 2 | 5 |
+| Random Forest | `n_estimators=50, max_depth=8, min_samples_leaf=10` | 10 | 2 |
+
+Each model undergoes Recursive Feature Elimination with Cross-Validation (`RFECV`) to select the optimal feature subset, then is retrained on the selected features. The best-performing model, along with its boolean RFECV feature mask and name, is saved to `artifacts/model.pkl`.
+
+A minimum val accuracy of 0.60 is enforced — training raises a `CustomException` if no model clears this threshold.
+
+---
+
+### Step 5 — Prediction Pipeline (`predict_pipeline.py`)
+
+At inference time, `PredictPipeline.predict(df)`:
+
+1. Loads `artifacts/preprocessor.pkl` and `artifacts/model.pkl`
+2. Applies `_apply_feature_engineering()` (same as training)
+3. Transforms through the fitted `ColumnTransformer`
+4. Applies the RFECV boolean feature mask
+5. Returns binary predictions (`0` = clean, `1` = infected)
 
 ---
 
 ## Web Application
 
-The Flask app (`app.py`) exposes three routes:
+Flask app (`app.py`) with three routes:
 
-- `GET /` — renders the upload form
-- `POST /predict` — accepts a CSV file, runs the prediction pipeline, and renders a results page showing a summary (total records, infected count, clean count) and a preview table of the first 50 predictions
-- `POST /download` — streams the full results as a downloadable `submission.csv`
+| Route | Method | Description |
+|---|---|---|
+| `/` | GET | Renders the drag-and-drop CSV upload form |
+| `/predict` | POST | Accepts a `.csv` file, runs `PredictPipeline`, renders results page with summary stats and a 50-row preview |
+| `/download` | POST | Streams the full prediction results as `submission.csv` |
 
-Only `.csv` files are accepted. If the uploaded CSV contains an `id` column it is preserved in the output; otherwise a sequential index is used.
+**Input format:** CSV matching the Kaggle test data column layout (75 feature columns + optional `id`). Only `.csv` files are accepted. If no `id` column is present, a sequential index is used.
+
+**Output format:** `id, target` — one row per input record.
+
+The UI (`index.html`) features a dark cyberpunk theme with a drag-and-drop dropzone, a pulsing "live" badge, and inline flash error messages. The results page shows total records, infected count, clean count, and a scrollable preview table.
 
 ---
 
@@ -116,20 +242,34 @@ Only `.csv` files are accepted. If the uploaded CSV contains an `id` column it i
 
 ### Prerequisites
 
-- Python 3.9+
-- The EDA-cleaned datasets at `notebook/data/train_eda_clean.csv` and `notebook/data/test_eda_clean.csv`
+- Python 3.11+
+- Raw data CSVs placed at:
+  - `notebook/data/train_eda_clean.csv`
+  - `notebook/data/test_eda_clean.csv`
 
-### Install dependencies
+  *(If starting from truly raw data, run `data_cleaning.py` first — see below.)*
+
+### Install
 
 ```bash
+# Install dependencies
 pip install -r requirements.txt
-# or install as a package
+
+# Or install as an editable package
 pip install -e .
 ```
 
-### Train the model
+### (Optional) Run Data Cleaning
 
-Run the full pipeline (ingestion → transformation → training) from the project root:
+If you have the original raw `train.csv` / `test.csv` in `artifacts/`:
+
+```bash
+python src/components/data_cleaning.py
+```
+
+### Train the Model
+
+Runs the full ingestion → transformation → training pipeline:
 
 ```bash
 python src/components/data_ingestion.py
@@ -137,35 +277,76 @@ python src/components/data_ingestion.py
 
 This writes `artifacts/model.pkl` and `artifacts/preprocessor.pkl`.
 
-### Run the app
+### Run the App
 
 ```bash
 python app.py
 ```
 
-The app starts on `http://0.0.0.0:7860`.
+The app starts at `http://0.0.0.0:7860`.
 
-### Run with Docker
+---
+
+## Docker
 
 ```bash
+# Build
 docker build -t system-threat-forecaster .
+
+# Run
 docker run -p 7860:7860 system-threat-forecaster
 ```
+
+The Dockerfile uses `python:3.11-slim`, installs `libgomp1` (required by LightGBM), and copies the full project. The app is served on port `7860` to match Hugging Face Spaces expectations.
+
+---
+
+## CI/CD
+
+GitHub Actions (`.github/workflows/cicd.yaml`) runs automatically on every push to `main`:
+
+**`test` job:**
+1. Checks out the repo
+2. Sets up Python 3.11
+3. Installs requirements + pytest
+4. Sets `PYTHONPATH` to workspace root
+5. Runs `pytest -v`
+
+**`deploy` job** (runs only after tests pass):
+1. Checks out repo with full history and LFS
+2. Authenticates to Hugging Face using the `HF_TOKEN` secret
+3. Force-pushes to the HF Space remote: `rishitpant/system-threat-forecaster`
+
+---
+
+## Testing
+
+```bash
+pytest -v
+```
+
+Current tests (`tests/test_app.py`):
+
+| Test | What it checks |
+|---|---|
+| `test_homepage` | `GET /` returns HTTP 200 |
 
 ---
 
 ## Dependencies
 
 ```
-pandas, numpy, scikit-learn
+pandas, numpy
+scikit-learn==1.8.0
 xgboost, lightgbm, catboost
 flask
 dill
 seaborn, matplotlib
+pytest
 ```
 
 ---
 
 ## Author
 
-Rishit Pant — `rishitpant100@gmail.com`
+**Rishit Pant** — [rishitpant100@gmail.com](mailto:rishitpant100@gmail.com)
