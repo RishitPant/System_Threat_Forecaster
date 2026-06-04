@@ -9,5 +9,6 @@ lightgbm
 dill
 flask
 pytest
+optuna
 
 #-e .
