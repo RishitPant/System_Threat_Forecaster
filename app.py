@@ -54,7 +54,7 @@ def predict():
         })
 
         # Render results page
-        table_html = results_df.head(10).to_html(
+        table_html = results_df.head(30).to_html(
             classes='results-table', index=False, border=0
         )
         total      = len(results_df)
