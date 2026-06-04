@@ -45,15 +45,16 @@ def predict():
         ids = df['id'] if 'id' in df.columns else pd.Series(range(len(df)), name='id')
 
         pipeline = PredictPipeline()
-        predictions = pipeline.predict(df)
+        predictions, probability = pipeline.predict(df)
 
         results_df = pd.DataFrame({
             'id':     ids.values,
-            'target': predictions
+            'target': predictions,
+            'confidence': probability
         })
 
         # Render results page
-        table_html = results_df.head(50).to_html(
+        table_html = results_df.head(30).to_html(
             classes='results-table', index=False, border=0
         )
         total      = len(results_df)
