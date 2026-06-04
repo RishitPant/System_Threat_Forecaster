@@ -41,9 +41,9 @@ class PredictPipeline:
             logging.info(f"Feature selection applied. Shape: {arr_selected.shape}")
 
             preds = model.predict(arr_selected)
-            logging.info(f"Predictions generated: {len(preds)} rows.")
+            proba = model.predict_proba(arr_selected)[:, 1]  # probability of being malware
 
-            return preds
+            return preds, proba
 
         except Exception as e:
             raise CustomException(e, sys)
