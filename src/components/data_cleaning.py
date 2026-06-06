@@ -9,8 +9,8 @@ from dataclasses import dataclass
 
 @dataclass
 class DataCleaningConfig:
-    raw_train_data_path: str = os.path.join('artifacts', 'train.csv')
-    raw_test_data_path: str = os.path.join('artifacts', 'test.csv')
+    raw_train_data_path: str = os.path.join('notebook', 'data', 'train.csv')
+    raw_test_data_path: str = os.path.join('notebook', 'data', 'test.csv')
 
     cleaned_train_data_path: str = os.path.join('notebook', 'data', 'train_eda_clean.csv')
     cleaned_test_data_path: str = os.path.join('notebook', 'data', 'test_eda_clean.csv')
