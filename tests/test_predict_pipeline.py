@@ -4,6 +4,11 @@ import pytest
 import os
 from src.pipeline.predict_pipeline import PredictPipeline
 
+pytestmark = pytest.mark.skipif(
+    not os.path.exists("artifacts/model.pkl") or 
+    not os.path.exists("notebook/data/test_eda_clean.csv"),
+    reason="Trained artifacts or data not found — run train_pipeline.py first"
+)
 
 @pytest.fixture
 def pipeline():
