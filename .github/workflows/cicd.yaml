@@ -3,7 +3,7 @@ name: CI/CD
 on:
   push:
     branches:
-      - main
+      - '**'
 
 jobs:
   test:
@@ -30,7 +30,7 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
-
+    if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
         with:
