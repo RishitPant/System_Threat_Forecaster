@@ -6,8 +6,6 @@ from src.exception import CustomException
 from src.logger import logging
 import pandas as pd
 from dataclasses import dataclass
-from src.components.model_trainer import ModelTrainerConfig, ModelTrainer
-from src.components.data_transformation import DataTransformation
 from sklearn.model_selection import train_test_split
 
 
@@ -61,14 +59,3 @@ if __name__ == "__main__":
     ingestion = DataIngestion()
     train_path, val_path, test_path = ingestion.initiate_data_ingestion()
     print(f"Train: {train_path} | Val: {val_path} | Test: {test_path}")
-
-    # Transform
-    transformation = DataTransformation()
-    train_arr, val_arr, test_arr, preprocessor_path = \
-        transformation.initiate_data_transformation(train_path, val_path, test_path)
-    print(f"Train: {train_arr.shape} | Val: {val_arr.shape} | Test: {test_arr.shape}")
-
-    # Train
-    trainer = ModelTrainer()
-    val_accuracy = trainer.initiate_model_trainer(train_arr, val_arr)
-    print(f"Best model val accuracy: {val_accuracy:.4f}")
