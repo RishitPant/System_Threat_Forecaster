@@ -20,6 +20,7 @@ A production-grade end-to-end ML system that predicts Windows malware infection 
 - [Overview](#overview)
 - [Project Structure](#project-structure)
 - [ML Pipeline](#ml-pipeline)
+- [Model Interpretability — SHAP Analysis](#model-interpretability--shap-analysis)
 - [Experiment Tracking — MLflow](#experiment-tracking--mlflow)
 - [Web Application](#web-application)
 - [Getting Started](#getting-started)
@@ -35,18 +36,19 @@ A production-grade end-to-end ML system that predicts Windows malware infection 
 
 System Threat Forecaster is a binary classification system built on a modified version of a malware prediction dataset with Windows device telemetry covering engine versions, OS metadata, hardware specs, antivirus signature data, and more. The goal is to predict `target` (0 = clean, 1 = malware-infected) for each system record.
 
-This was a graded academic ML project with an associated viva. The dataset was intentionally modified from the original source. The judging metric was accuracy.
+This was a graded academic ML project with an associated viva. The dataset was intentionally modified from the original source, making it a hard problem: **the top leaderboard score in the class was 64.95% accuracy.** The judging metric was accuracy.
 
 **What this project covers end-to-end:**
 
 - Raw data cleaning (duplicate removal, column pruning, missing-target handling)
 - Rich feature engineering — version splitting, date decomposition, categorical grouping, derived hardware features
 - Sklearn `ColumnTransformer` preprocessing with type-aware pipelines
-- 7-model baseline evaluation (accuracy, F1, precision, recall, ROC-AUC, average precision)
+- 7-model baseline evaluation with full metrics (accuracy, F1, precision, recall, ROC-AUC, average precision)
 - Bayesian hyperparameter tuning via **Optuna** (TPE sampler, 20 trials, AUC-optimized) on the top 3 models
 - Recursive Feature Elimination with Cross-Validation (**RFECV**) on the best tuned model
 - Per-stage visual eval reports: confusion matrix, ROC curve, PR curve for every model at every stage
-- MLflow experiment tracking — all runs logged with metrics, params, and stage tags; final model registered in MLflow Model Registry
+- **SHAP analysis** — global feature importance, summary plot, dependence plots, and single-prediction waterfall explanations
+- **MLflow experiment tracking** — all runs logged with metrics, params, and stage tags; final model registered in MLflow Model Registry
 - Serialized artifacts (`model.pkl`, `preprocessor.pkl`) for reproducible inference
 - Flask web app with drag-and-drop CSV upload, prediction summary, and CSV download
 - Dockerized deployment on Hugging Face Spaces (port 7860)
@@ -74,7 +76,7 @@ SystemThreatForecaster/
 │   │   ├── data_cleaning.py          # Drops duplicates, unnecessary columns, null targets
 │   │   ├── data_ingestion.py         # 80/20 train/val split → artifacts/
 │   │   ├── data_transformation.py    # Feature engineering + ColumnTransformer fit/save
-│   │   ├── model_trainer.py          # Baseline → Optuna tuning → RFECV → MLflow logging → best model saved
+│   │   ├── model_trainer.py          # Baseline → Optuna tuning → RFECV → MLflow → best model saved
 │   │   └── model_pusher.py           # (reserved)
 │   │
 │   └── pipeline/
@@ -87,20 +89,25 @@ SystemThreatForecaster/
 │   ├── eval/
 │   │   ├── baseline/                 # 7 × 3-panel eval PNGs (confusion, ROC, PR)
 │   │   ├── tuned/                    # 3 × 3-panel eval PNGs (post-Optuna)
-│   │   └── final/                    # 1 × 3-panel eval PNG (post-RFECV best model)
+│   │   ├── final/                    # 1 × 3-panel eval PNG (post-RFECV best model)
+│   │   ├── shap_summary.png          # SHAP beeswarm — direction + magnitude per feature
+│   │   ├── shap_bar.png              # Mean |SHAP| global importance
+│   │   ├── shap_dependence_top3.png  # Feature value vs SHAP for top 3 features
+│   │   ├── shap_waterfall_infected.png  # Single prediction explanation
+│   │   └── feature_importance.png    # LightGBM gain + split count
 │   └── params/
 │       ├── lightgbm_best_params.json
 │       ├── xgboost_best_params.json
 │       └── random_forest_best_params.json
 │
-├── mlruns/                           # MLflow run data (auto-generated)
+├── mlruns/                           # MLflow run data (auto-generated, not committed)
 │
 ├── templates/
 │   ├── index.html                    # Drag-and-drop upload UI
 │   └── results.html                  # Prediction summary + 30-row preview + download
 │
 ├── notebook/
-│   └── EDA.ipynb                     # Exploratory data analysis
+│   └── EDA.ipynb                     # 117-cell EDA + SHAP analysis notebook
 │
 ├── tests/
 │   ├── test_app.py                   # Flask route tests
@@ -133,8 +140,8 @@ This executes all four steps in sequence: clean → ingest → transform → tra
 
 Processes raw CSVs before ingestion:
 
-- Drops exact duplicate rows from the training set
-- Removes irrelevant/redundant columns (`MachineID`, `IsBetaUser`, `SMode`, `IsVirtualDevice`, `OSBuildLab`, `Processor`, `OSVersion`, and others — 15 total)
+- Drops exact duplicate rows (165 found in training data)
+- Removes 15 irrelevant/redundant columns identified during EDA (`MachineID`, `IsBetaUser`, `SMode`, `IsVirtualDevice`, `OSBuildLab`, `Processor`, `OSVersion`, and others)
 - Drops rows with null `target` labels
 
 Reads from `notebook/data/train.csv` and `notebook/data/test.csv`.
@@ -144,7 +151,7 @@ Outputs `train_eda_clean.csv` and `test_eda_clean.csv` to `notebook/data/`.
 
 ### Step 1 — Data Ingestion (`data_ingestion.py`)
 
-Reads the cleaned CSVs and performs a **80/20 train/val split** (random state 42). Writes `artifacts/train.csv`, `artifacts/val.csv`, and `artifacts/test.csv`.
+Reads the cleaned CSVs and performs an **80/20 train/val split** (random state 42). Writes `artifacts/train.csv`, `artifacts/val.csv`, and `artifacts/test.csv`.
 
 ---
 
@@ -196,7 +203,7 @@ Applied identically at training and inference time via `_apply_feature_engineeri
 
 **Phase 1 — Baseline evaluation** across 7 classifiers (default hyperparameters), scored on val accuracy, F1, precision, recall, ROC-AUC, and average precision. Eval reports (3-panel PNGs) saved for every model.
 
-> **Context:** This dataset was modified from its original source. The class leaderboard ceiling was **64.95% accuracy**.
+> **Context:** This dataset was modified from its original source for an academic setting. The class leaderboard ceiling was **64.95% accuracy**.
 
 | Model | Val Accuracy |
 |---|---|
@@ -234,15 +241,45 @@ Applied identically at training and inference time via `_apply_feature_engineeri
 
 ---
 
+## Model Interpretability — SHAP Analysis
+
+All SHAP analysis lives in `notebook/EDA.ipynb` (final section) and outputs are saved to `artifacts/eval/`.
+
+SHAP (SHapley Additive exPlanations) assigns each feature a contribution value per prediction — more reliable than LightGBM's built-in importance because it's model-agnostic and accounts for feature interactions.
+
+### Key findings
+
+**The model is primarily driven by antivirus coverage and freshness.** The top 3 features by mean |SHAP| are:
+
+| Feature | Interpretation |
+|---|---|
+| `NumAntivirusProductsInstalled` | Machines with 0 AV products get a SHAP push of ~+0.25 toward malware. Having even one product drops this sharply. |
+| `EngineVersion_Build` | Outdated AV engine build numbers correlate strongly with infection. Version splitting was key to surfacing this. |
+| `AntivirusConfigID` | Specific AV configurations have distinct risk profiles — certain configs push SHAP to +0.6 (very risky), others to -0.8 (very clean). |
+
+Other notable signals: low RAM (`TotalPhysicalRAMMB`) → proxy for older/less-maintained hardware; `IsGamer = 1` → gaming machines often have AV disabled; non-standard OS install types (`OSInstallType_Grouped_Others`) → higher risk than clean installs.
+
+### Plots generated
+
+**SHAP Summary (beeswarm)** — each dot is one validation row. X-axis = SHAP value (positive = toward malware), colour = feature value (red = high, blue = low). Shows both direction and magnitude of each feature's influence.
+
+**SHAP Bar** — mean |SHAP| across all rows. Global importance ranking comparable to but more reliable than gain importance.
+
+**Dependence plots (top 3)** — feature value vs SHAP value, coloured by a second interacting feature. Shows whether relationships are linear, threshold-based, or non-monotonic.
+
+**Waterfall plot** — single infected prediction explained step-by-step from the base rate (`E[f(X)] = 0.017`) to the final output (`f(x) ≈ 1.0`). Example: a gaming machine with 0 AV products, non-standard OS install, and old engine build — every major risk factor aligned.
+
+---
+
 ## Experiment Tracking — MLflow
 
-Every training run is tracked in MLflow under the `Threat_Forecaster` experiment. All three stages are logged with consistent metrics so you can compare them side by side in the UI.
+Every training run is tracked in MLflow under the `Threat_Forecaster` experiment. All three stages are logged with consistent metrics for side-by-side comparison.
 
-| Stage | Tag | What's logged |
+| Stage tag | Run name pattern | What's logged |
 |---|---|---|
-| `Baseline_{model}` | `baseline` | `val_roc_auc`, `val_recall`, `val_precision`, `val_f1`, `val_ap` |
-| `Tuned_{model}` | `tuning` | same metrics + all hyperparameters via `log_params` |
-| `Final_{model}` | `final` | same metrics + `features_selected` + hyperparameters + model artifact registered as `Threat_Forecaster` |
+| `baseline` | `Baseline_{model}` | `val_roc_auc`, `val_recall`, `val_precision`, `val_f1`, `val_ap` |
+| `tuning` | `Tuned_{model}` | same metrics + all hyperparameters via `log_params` |
+| `final` | `Final_{model}` | same metrics + `features_selected` + hyperparameters + model artifact registered as `Threat_Forecaster` |
 
 **Start the MLflow UI:**
 
@@ -251,11 +288,11 @@ mlflow ui
 # → http://localhost:5000
 ```
 
-Select any combination of runs and click **Compare** to view metrics side by side across all stages.
+Select any combination of runs across stages and click **Compare** to view metrics side by side.
 
-The final model is also registered in the **MLflow Model Registry** under the name `Threat_Forecaster`, making it easy to version and promote between stages (Staging → Production) if needed.
+The final model is registered in the **MLflow Model Registry** under `Threat_Forecaster`, enabling version tracking and stage promotion (Staging → Production) if needed.
 
-> `mlruns/` is auto-generated locally and is excluded from version control via `.gitignore`.
+> `mlruns/` is auto-generated locally and excluded from version control via `.gitignore`.
 
 ---
 
@@ -306,7 +343,11 @@ mlflow ui
 # → http://localhost:5000
 ```
 
-### Run the App
+### Run SHAP analysis
+
+Open `notebook/EDA.ipynb` and run the **SHAP Analysis** section at the bottom. Requires trained artifacts in `artifacts/`.
+
+### Run the app
 
 ```bash
 python app.py
@@ -357,7 +398,7 @@ pytest -v
 | `test_predict_pipeline.py` | 4 | Two outputs returned, output length matches input, predictions are binary {0,1}, probabilities in [0,1] — skipped if artifacts absent |
 | `test_app.py` | 3 | Homepage 200 OK, no-file POST doesn't crash, wrong file type POST doesn't crash |
 
-Predict pipeline tests are skipped automatically in CI since `artifacts/model.pkl` and the cleaned CSVs are not committed to the repo. All other tests run on every push.
+Predict pipeline tests are skipped automatically in CI since `artifacts/model.pkl` and the cleaned CSVs are not committed to the repo. All other 14 tests run on every push.
 
 ---
 
@@ -369,6 +410,7 @@ scikit-learn==1.8.0
 xgboost, lightgbm
 optuna
 mlflow
+shap
 flask
 dill
 seaborn, matplotlib
