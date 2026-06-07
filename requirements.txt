@@ -10,5 +10,6 @@ flask
 pytest
 optuna
 mlflow
+shap
 
 #-e .
