@@ -151,6 +151,8 @@ activemq-data/
 artifacts/*.csv
 notebook/data/*.csv
 notebook/Model_Training.ipynb
+mlruns/
+mlflow.db
 .env
 .envrc
 .venv

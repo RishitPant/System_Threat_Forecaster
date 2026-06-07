@@ -8,6 +8,8 @@ from dataclasses import dataclass
 import optuna
 from optuna.samplers import TPESampler
 optuna.logging.set_verbosity(optuna.logging.WARNING)
+import mlflow
+import mlflow.sklearn
 
 import matplotlib
 matplotlib.use('Agg')
@@ -116,6 +118,7 @@ TUNING_FUNCTIONS = {
     'Random Forest': tune_random_forest,
 }
 
+mlflow.set_experiment("Threat_Forecaster")
 
 class ModelTrainer:
     def __init__(self):
@@ -148,7 +151,7 @@ class ModelTrainer:
             logging.info(f"Baseline model report: {model_report}")
 
             for name, model in models.items():
-                evaluate_final_model(
+                baseline_metrics = evaluate_final_model(
                     model      = model,
                     X_val      = X_val,
                     y_val      = y_val,
@@ -156,6 +159,13 @@ class ModelTrainer:
                     name       = f"Baseline_{name}",
                     report_dir = "artifacts/eval/baseline"
                 )
+                with mlflow.start_run(run_name=f"Baseline_{name}"):
+                    mlflow.set_tag("stage", "baseline")
+                    mlflow.log_metric("val_roc_auc",   baseline_metrics['auc'])
+                    mlflow.log_metric("val_recall",    baseline_metrics['recall'])
+                    mlflow.log_metric("val_precision", baseline_metrics['precision'])
+                    mlflow.log_metric("val_f1",        baseline_metrics['f1'])
+                    mlflow.log_metric("val_ap",        baseline_metrics['ap'])
 
             top_3_names = sorted(
                 model_report.keys(),
@@ -178,17 +188,8 @@ class ModelTrainer:
                     tuned_model = tune_fn(X_train, y_train, X_val, y_val, params_path=params_path)
 
                 tuned_model.fit(X_train, y_train)
-                auc    = roc_auc_score(y_val, tuned_model.predict_proba(X_val)[:, 1])
-                recall = recall_score(y_val, tuned_model.predict(X_val))
-                logging.info(f"Tuned {name} → AUC: {auc:.4f} | Recall: {recall:.4f}")
 
-                tuned_results[name] = {
-                    'model':       tuned_model,
-                    'val_roc_auc': auc,
-                    'recall':      recall,
-                }
-
-                evaluate_final_model(
+                tuned_metrics = evaluate_final_model(
                     model      = tuned_model,
                     X_val      = X_val,
                     y_val      = y_val,
@@ -196,6 +197,22 @@ class ModelTrainer:
                     name       = f"Tuned_{name}",
                     report_dir = "artifacts/eval/tuned"
                 )
+                logging.info(f"Tuned {name} → AUC: {tuned_metrics['auc']:.4f} | Recall: {tuned_metrics['recall']:.4f}")
+
+                tuned_results[name] = {
+                    'model':       tuned_model,
+                    'val_roc_auc': tuned_metrics['auc'],
+                    'recall':      tuned_metrics['recall'],
+                }
+
+                with mlflow.start_run(run_name=f"Tuned_{name}"):
+                    mlflow.set_tag("stage", "tuning")
+                    mlflow.log_params(tuned_model.get_params())
+                    mlflow.log_metric("val_roc_auc",   tuned_metrics['auc'])
+                    mlflow.log_metric("val_recall",    tuned_metrics['recall'])
+                    mlflow.log_metric("val_precision", tuned_metrics['precision'])
+                    mlflow.log_metric("val_f1",        tuned_metrics['f1'])
+                    mlflow.log_metric("val_ap",        tuned_metrics['ap'])
 
             best_name = max(tuned_results, key=lambda k: tuned_results[k]['val_roc_auc'])
             best      = tuned_results[best_name]
@@ -222,7 +239,7 @@ class ModelTrainer:
 
             best['model'].fit(X_train_sel, y_train)
 
-            evaluate_final_model(
+            final_metrics = evaluate_final_model(
                 model      = best['model'],
                 X_val      = X_val,
                 y_val      = y_val,
@@ -230,6 +247,21 @@ class ModelTrainer:
                 name       = f"Final_{best_name}",
                 report_dir = "artifacts/eval/final"
             )
+
+            with mlflow.start_run(run_name=f"Final_{best_name}"):
+                mlflow.set_tag("stage", "final")
+                mlflow.log_params(best['model'].get_params())
+                mlflow.log_metric("val_roc_auc",      final_metrics['auc'])
+                mlflow.log_metric("val_recall",       final_metrics['recall'])
+                mlflow.log_metric("val_precision",    final_metrics['precision'])
+                mlflow.log_metric("val_f1",           final_metrics['f1'])
+                mlflow.log_metric("val_ap",           final_metrics['ap'])
+                mlflow.log_metric("features_selected", int(selected.sum()))
+                mlflow.sklearn.log_model(
+                    best['model'],
+                    artifact_path="model",
+                    registered_model_name="Threat_Forecaster"
+                )
 
             save_object(
                 file_path = self.model_trainer_config.trained_model_file_path,

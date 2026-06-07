@@ -9,5 +9,6 @@ dill
 flask
 pytest
 optuna
+mlflow
 
 #-e .
