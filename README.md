@@ -20,6 +20,7 @@ A production-grade end-to-end ML system that predicts Windows malware infection 
 - [Overview](#overview)
 - [Project Structure](#project-structure)
 - [ML Pipeline](#ml-pipeline)
+- [Experiment Tracking — MLflow](#experiment-tracking--mlflow)
 - [Web Application](#web-application)
 - [Getting Started](#getting-started)
 - [Docker](#docker)
@@ -32,30 +33,31 @@ A production-grade end-to-end ML system that predicts Windows malware infection 
 
 ## Overview
 
-System Threat Forecaster is a binary classification system built on a modified version of some malware prediction dataset with windows device telemetry covering engine versions, OS metadata, hardware specs, antivirus signature data, and more. The goal is to predict `target` (0 = clean, 1 = malware-infected) for each system record.
+System Threat Forecaster is a binary classification system built on a modified version of a malware prediction dataset with Windows device telemetry covering engine versions, OS metadata, hardware specs, antivirus signature data, and more. The goal is to predict `target` (0 = clean, 1 = malware-infected) for each system record.
 
-This was a graded academic ML project with an associated viva. The dataset was intentionally modified from the original source, making it a hard problem: **the top leaderboard score in the class was 64.95% accuracy.** The judging metric was accuracy.
+This was a graded academic ML project with an associated viva. The dataset was intentionally modified from the original source. The judging metric was accuracy.
 
 **What this project covers end-to-end:**
 
 - Raw data cleaning (duplicate removal, column pruning, missing-target handling)
 - Rich feature engineering — version splitting, date decomposition, categorical grouping, derived hardware features
 - Sklearn `ColumnTransformer` preprocessing with type-aware pipelines
-- 7-model baseline evaluation (accuracy, F1, recall, ROC-AUC)
+- 7-model baseline evaluation (accuracy, F1, precision, recall, ROC-AUC, average precision)
 - Bayesian hyperparameter tuning via **Optuna** (TPE sampler, 20 trials, AUC-optimized) on the top 3 models
 - Recursive Feature Elimination with Cross-Validation (**RFECV**) on the best tuned model
 - Per-stage visual eval reports: confusion matrix, ROC curve, PR curve for every model at every stage
+- MLflow experiment tracking — all runs logged with metrics, params, and stage tags; final model registered in MLflow Model Registry
 - Serialized artifacts (`model.pkl`, `preprocessor.pkl`) for reproducible inference
 - Flask web app with drag-and-drop CSV upload, prediction summary, and CSV download
 - Dockerized deployment on Hugging Face Spaces (port 7860)
-- GitHub Actions CI/CD: pytest on every push, auto-deploy to HF Space on green
+- GitHub Actions CI/CD: pytest on every push, auto-deploy to HF Space on green main
 
 ---
 
 ## Project Structure
 
 ```
-STF-F3/
+SystemThreatForecaster/
 │
 ├── app.py                            # Flask entry point (routes: /, /predict, /download)
 ├── Dockerfile                        # python:3.11-slim, exposes port 7860
@@ -64,19 +66,19 @@ STF-F3/
 │
 ├── src/
 │   ├── exception.py                  # CustomException with file + line traceback
-│   ├── logger.py                     # Timestamped file logger → logs/<timestamp>.log/
+│   ├── logger.py                     # Timestamped file logger → logs/<timestamp>.log
 │   ├── utils.py                      # save_object/load_object (dill), evaluate_models,
 │   │                                 #   evaluate_final_model (3-panel plots), param I/O
 │   │
 │   ├── components/
-│   │   ├── data_cleaning.py          # Drops duplicates, 16 bad columns, null targets
-│   │   ├── data_ingestion.py         # Stratified 80/20 train/val split
+│   │   ├── data_cleaning.py          # Drops duplicates, unnecessary columns, null targets
+│   │   ├── data_ingestion.py         # 80/20 train/val split → artifacts/
 │   │   ├── data_transformation.py    # Feature engineering + ColumnTransformer fit/save
-│   │   ├── model_trainer.py          # Baseline → Optuna tuning → RFECV → best model saved
+│   │   ├── model_trainer.py          # Baseline → Optuna tuning → RFECV → MLflow logging → best model saved
 │   │   └── model_pusher.py           # (reserved)
 │   │
 │   └── pipeline/
-│       ├── train_pipeline.py         # Orchestrates full training run
+│       ├── train_pipeline.py         # Orchestrates full training run (clean → ingest → transform → train)
 │       └── predict_pipeline.py       # Inference: FE → preprocess → RFECV mask → predict
 │
 ├── artifacts/
@@ -91,36 +93,51 @@ STF-F3/
 │       ├── xgboost_best_params.json
 │       └── random_forest_best_params.json
 │
+├── mlruns/                           # MLflow run data (auto-generated)
+│
 ├── templates/
 │   ├── index.html                    # Drag-and-drop upload UI
-│   ├── results.html                  # Prediction summary + 30-row preview + download
-│   └── home.html
+│   └── results.html                  # Prediction summary + 30-row preview + download
 │
 ├── notebook/
 │   └── EDA.ipynb                     # Exploratory data analysis
 │
 ├── tests/
-│   └── test_app.py                   # pytest: homepage 200 OK
+│   ├── test_app.py                   # Flask route tests
+│   ├── test_data_cleaning.py         # Unit tests for cleaning functions
+│   ├── test_data_transformation.py   # Unit tests for feature engineering
+│   └── test_predict_pipeline.py      # Integration tests (skipped if artifacts absent)
 │
 ├── logs/                             # Timestamped runtime logs
 │
 └── .github/
     └── workflows/
-        └── cicd.yaml                 # CI: pytest | CD: push to HF Space
+        └── cicd.yaml                 # CI: pytest on all pushes | CD: deploy to HF Space on main
 ```
 
 ---
 
 ## ML Pipeline
 
+Run the full pipeline end-to-end with a single command:
+
+```bash
+python src/pipeline/train_pipeline.py
+```
+
+This executes all four steps in sequence: clean → ingest → transform → train.
+
+---
+
 ### Step 0 — Data Cleaning (`data_cleaning.py`)
 
 Processes raw CSVs before ingestion:
 
-- Drops exact duplicate rows
-- Removes 16 irrelevant/redundant columns (`MachineID`, `IsBetaUser`, `SMode`, `IsVirtualDevice`, `OSBuildLab`, `Processor`, `OSVersion`, and others)
+- Drops exact duplicate rows from the training set
+- Removes irrelevant/redundant columns (`MachineID`, `IsBetaUser`, `SMode`, `IsVirtualDevice`, `OSBuildLab`, `Processor`, `OSVersion`, and others — 15 total)
 - Drops rows with null `target` labels
 
+Reads from `notebook/data/train.csv` and `notebook/data/test.csv`.
 Outputs `train_eda_clean.csv` and `test_eda_clean.csv` to `notebook/data/`.
 
 ---
@@ -164,11 +181,7 @@ Applied identically at training and inference time via `_apply_feature_engineeri
 | `Primary_Disk_Allocated` | `PrimaryDiskCapacityMB / SystemVolumeCapacityMB` |
 | `Free_Disk_Space` | `(SysVolCapacity − PrimaryDiskCapacity) / PrimaryDiskCapacity` |
 
----
-
-### Step 3 — Preprocessing (`data_transformation.py`)
-
-A `ColumnTransformer` is **fit on training data only**, serialized to `artifacts/preprocessor.pkl`:
+**Preprocessing** — A `ColumnTransformer` is fit on training data only and serialized to `artifacts/preprocessor.pkl`:
 
 | Column Type | Detection | Pipeline |
 |---|---|---|
@@ -179,11 +192,11 @@ A `ColumnTransformer` is **fit on training data only**, serialized to `artifacts
 
 ---
 
-### Step 4 — Model Training (`model_trainer.py`)
+### Step 3 — Model Training (`model_trainer.py`)
 
-**Phase 1 — Baseline evaluation** across 7 classifiers (default hyperparameters), scored on val accuracy, F1, recall, and ROC-AUC. Eval reports (3-panel PNGs) saved for every model.
+**Phase 1 — Baseline evaluation** across 7 classifiers (default hyperparameters), scored on val accuracy, F1, precision, recall, ROC-AUC, and average precision. Eval reports (3-panel PNGs) saved for every model.
 
-> **Context:** This dataset was modified from its original source for an academic setting. The class leaderboard ceiling was **64.95% accuracy**.
+> **Context:** This dataset was modified from its original source. The class leaderboard ceiling was **64.95% accuracy**.
 
 | Model | Val Accuracy |
 |---|---|
@@ -209,7 +222,7 @@ A `ColumnTransformer` is **fit on training data only**, serialized to `artifacts
 
 ---
 
-### Step 5 — Prediction Pipeline (`predict_pipeline.py`)
+### Step 4 — Prediction Pipeline (`predict_pipeline.py`)
 
 `PredictPipeline.predict(df)` mirrors the training path exactly:
 
@@ -218,6 +231,31 @@ A `ColumnTransformer` is **fit on training data only**, serialized to `artifacts
 3. Transform via the fitted `ColumnTransformer`
 4. Apply the RFECV boolean mask
 5. Return binary predictions + probability scores (`0` = clean, `1` = infected)
+
+---
+
+## Experiment Tracking — MLflow
+
+Every training run is tracked in MLflow under the `Threat_Forecaster` experiment. All three stages are logged with consistent metrics so you can compare them side by side in the UI.
+
+| Stage | Tag | What's logged |
+|---|---|---|
+| `Baseline_{model}` | `baseline` | `val_roc_auc`, `val_recall`, `val_precision`, `val_f1`, `val_ap` |
+| `Tuned_{model}` | `tuning` | same metrics + all hyperparameters via `log_params` |
+| `Final_{model}` | `final` | same metrics + `features_selected` + hyperparameters + model artifact registered as `Threat_Forecaster` |
+
+**Start the MLflow UI:**
+
+```bash
+mlflow ui
+# → http://localhost:5000
+```
+
+Select any combination of runs and click **Compare** to view metrics side by side across all stages.
+
+The final model is also registered in the **MLflow Model Registry** under the name `Threat_Forecaster`, making it easy to version and promote between stages (Staging → Production) if needed.
+
+> `mlruns/` is auto-generated locally and is excluded from version control via `.gitignore`.
 
 ---
 
@@ -231,11 +269,9 @@ Flask app (`app.py`) with three routes:
 | `/predict` | POST | Accepts `.csv`, runs `PredictPipeline`, renders results with summary stats, 30-row preview, and confidence scores |
 | `/download` | POST | Streams full predictions as `submission.csv` |
 
-**Input:** CSV matching the Kaggle test data column layout. If no `id` column is present, a sequential index is used.
+**Input:** CSV matching the test data column layout. If no `id` column is present, a sequential index is used.
 
 **Output:** `id, target, confidence` — one row per input record.
-
-The UI (`index.html`) is a dark cyberpunk-themed single-page app with drag-and-drop file upload, a pulsing live badge, and inline flash error messages. The results page (`results.html`) shows infected/clean counts and a scrollable preview table.
 
 ---
 
@@ -244,9 +280,7 @@ The UI (`index.html`) is a dark cyberpunk-themed single-page app with drag-and-d
 ### Prerequisites
 
 - Python 3.11+
-- EDA-cleaned CSVs at `notebook/data/train_eda_clean.csv` and `notebook/data/test_eda_clean.csv`
-
-  *(If starting from raw data, run `data_cleaning.py` first — see below.)*
+- Raw data at `notebook/data/train.csv` and `notebook/data/test.csv`
 
 ### Install
 
@@ -257,19 +291,20 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-### (Optional) Run Data Cleaning
+### Train (full pipeline)
 
 ```bash
-python src/components/data_cleaning.py
+python src/pipeline/train_pipeline.py
 ```
 
-### Train
+Runs cleaning → ingestion → transformation → training and writes `artifacts/model.pkl` and `artifacts/preprocessor.pkl`.
+
+### View experiment results
 
 ```bash
-python src/components/data_ingestion.py
+mlflow ui
+# → http://localhost:5000
 ```
-
-Writes `artifacts/model.pkl` and `artifacts/preprocessor.pkl`.
 
 ### Run the App
 
@@ -293,16 +328,16 @@ The Dockerfile uses `python:3.11-slim`, installs `libgomp1` (required by LightGB
 
 ## CI/CD
 
-GitHub Actions (`.github/workflows/cicd.yaml`) runs on every push to `main`:
+GitHub Actions (`.github/workflows/cicd.yaml`) runs on every push:
 
-**`test` job:**
+**`test` job** (all branches):
 1. Checkout repo
 2. Setup Python 3.11
-3. Install requirements + pytest
+3. Install `requirements.txt`
 4. Set `PYTHONPATH` to workspace root
 5. Run `pytest -v`
 
-**`deploy` job** (runs only after tests pass):
+**`deploy` job** (main branch only, after tests pass):
 1. Checkout with full history and LFS
 2. Authenticate to Hugging Face via `HF_TOKEN` secret
 3. Force-push to `rishitpant/system-threat-forecaster` on HF Spaces
@@ -315,9 +350,14 @@ GitHub Actions (`.github/workflows/cicd.yaml`) runs on every push to `main`:
 pytest -v
 ```
 
-| Test | What it checks |
-|---|---|
-| `test_homepage` | `GET /` returns HTTP 200 |
+| File | Tests | What they check |
+|---|---|---|
+| `test_data_cleaning.py` | 6 | Duplicate removal, column dropping (with and without missing cols), null target handling |
+| `test_data_transformation.py` | 5 | Version column splitting, original columns dropped, date decomposition, RAM/core ratio, graceful handling of minimal input |
+| `test_predict_pipeline.py` | 4 | Two outputs returned, output length matches input, predictions are binary {0,1}, probabilities in [0,1] — skipped if artifacts absent |
+| `test_app.py` | 3 | Homepage 200 OK, no-file POST doesn't crash, wrong file type POST doesn't crash |
+
+Predict pipeline tests are skipped automatically in CI since `artifacts/model.pkl` and the cleaned CSVs are not committed to the repo. All other tests run on every push.
 
 ---
 
@@ -326,8 +366,9 @@ pytest -v
 ```
 pandas, numpy
 scikit-learn==1.8.0
-xgboost, lightgbm, catboost
+xgboost, lightgbm
 optuna
+mlflow
 flask
 dill
 seaborn, matplotlib
