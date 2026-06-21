@@ -52,7 +52,7 @@ This was a graded academic ML project with an associated viva. The dataset was i
 - Serialized artifacts (`model.pkl`, `preprocessor.pkl`) for reproducible inference
 - Flask web app with drag-and-drop CSV upload, prediction summary, and CSV download
 - Dockerized deployment on Hugging Face Spaces (port 7860)
-- GitHub Actions CI/CD: pytest on every push, auto-deploy to HF Space on green main
+- GitHub Actions CI/CD: pytest on every push, auto-deploy to HF Space on green main.
 
 ---
 
