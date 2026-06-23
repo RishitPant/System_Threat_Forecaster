@@ -11,7 +11,7 @@ pinned: false
 
 A production-grade end-to-end ML system that predicts Windows malware infection from hardware and OS telemetry. Upload a CSV of system records and receive a binary threat classification per row — downloadable as `submission.csv`.
 
-> **Live Demo** → [rishitpant/system-threat-forecaster on Hugging Face Spaces](https://huggingface.co/spaces/rishitpant/system-threat-forecaster)
+> **Live Demo** → [rishitpant/system-threat-forecaster on Hugging Face Spaces](https://huggingface.co/spaces/rishitpant/system-threat-forecaster-2)
 
 ---
 
