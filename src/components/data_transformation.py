@@ -189,7 +189,7 @@ class DataTransformation:
 
             numerical_pipeline = Pipeline(steps=[
                 ("imputer", SimpleImputer(strategy="mean")),
-                ("scaler",  MinMaxScaler())
+                #("scaler",  MinMaxScaler())
             ])
             binary_pipeline = Pipeline(steps=[
                 ("imputer", SimpleImputer(strategy="most_frequent")),
